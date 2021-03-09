@@ -1,10 +1,48 @@
+/***************************************************************************
+*   BATTAGLIA NAVALE:
+*   AUTORI: Viciguerra Francesco e Pes Luca
+*   CLASSE: 3^AIA
+*   DATA DI CONSEGNA: 11/02/2021
+****************************************************************************
+*   IPOTESI:
+*       * I campi vengono storati in 2 matrici. Non quattro. Questo ci permette
+*           di utilizzare meno memoria. Nelle matrici vengono storati degli int
+*           che indentificano il contenuto. Non utlizziamo i caratteri per chiarezza
+*           del codice. L'impatto per performance è anche migliore quando bisogna
+*           cambiare colore al testo.
+*       * L'utente è in grado di decidere la grandezza del campo.
+*       * Quando un giocatore colpisce una nave è in grado di tirare un altro colpo
+*       * L'utente è in grado di decidere quante navi per quale tipo avere in campo.
+*       * Il numero massimo di navi è calcolato statisticamente. Se il numero di caselle
+*           utilizzate dalle navi fratto il numero totale di caselle è maggiore o uguale
+*           a RATEO_CAPACITA_MAX, non è possibile inserire navi.
+*       * Il gioco può finire in pareggio. Ogni giocatore gioca lo stesso numero di
+*           turni.
+*       * Se il numero di navi richiesto dal giocatore è 0, utilizziamo un preset di
+*           default.
+* 
+*   MACRO FUNZIONAMENTO:
+*       * Richiesta grandezza campo.
+*       * Richiesta numero navi per tipo.
+*       * Richiesta posizione navi in campo.
+*       * Gioco:
+*           * Finche almeno un giocatore non perde tutte le navi:
+*               * Richieste coordinate
+*               * Update campo
+*       * Proclamazione vincitore.
+* 
+*   NOTE AGGIUNTIVE:
+*       * Per resettare le matrici è stato usato il comando memset();
+*       * Note aggiuntive sparse nei commenti del lavoro.
+*/
+
 #include <iostream>
 #include <Windows.h>
-//#include "gfx.h"
 using namespace std;
 
-#define LUNG_NAVE(_idNave) (_idNave + 1)
-#define CHAR_TO_INT(_character) (toupper(_character) - 'A')
+#define LUNG_NAVE(__idNave) (__idNave + 1)
+#define CHAR_TO_INT(__character) (toupper(__character) - 'A')
+#define CONTROLLA_MAX_RATEO(__numCaselleUtilizzate, __lungC, __lungR) ((((float)__numCaselleUtilizzate / (float)(__lungC * lungR)) > RATEO_CAPACITA_MAX) ? true : false)
 
 /*  Definizioni di costanti
 */
@@ -56,7 +94,6 @@ const string VECT_NOMI_NAVI[NUM_NAVI] = {
 
 //  Dichiarazioni prototipi funzioni
 int LeggiNumeriNavi(int[], int&, int, int);
-bool ControllaSeMaxRateo(int, int, int);
 bool ChiediVerso();
 void InserimentoNavi(int[][DIM_C], int[], int, int, HANDLE);
 bool ControllaPosizionamento(int[][DIM_C], int, int, bool, int, int, int);
@@ -66,15 +103,15 @@ void DisegnaBersagli(int[][DIM_C], int, int, HANDLE);
 void ResetMatrice(int[][DIM_C], int);
 void ChiediGrandezzaCampo(int&, int&);
 
-int NaveOrizzontale(int[][DIM_C], int, int, int);
-int NaveVerticale(int[][DIM_C], int, int, int);
-int NaviColpite(int[][DIM_C], int, int, int, int);
+int ControllaAffondata(int[][DIM_C], int, int, int, int, bool);
+int ColpisciNave(int[][DIM_C], int, int, int, int);
 
 void ChiediCoordinate(int&, int&, int, int);
 int Gioco(int[][DIM_C], int[][DIM_C], HANDLE, int, int, int);
 
 int main()
 {
+    //  Necessario per ottenere l'handle del terminale per poter cambiare colore. Funziona solo su Windows.
     HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
 
     //  Dichiarazione matrici
@@ -82,30 +119,37 @@ int main()
     int matGiocatore2[DIM_R][DIM_C];
     int lungR, lungC;
 
-    //  Reset matrici 
-    ResetMatrice(matGiocatore1, ID_ACQUA);
-    ResetMatrice(matGiocatore2, ID_ACQUA);
-
-    ChiediGrandezzaCampo(lungC, lungR);
-
     //  Vettore nel quale vengono salvati il numero di navi per ogni tipo
     int vectNavi[NUM_NAVI];
     int naviTot;
+
+    //  Reset matrici 
+    ResetMatrice(matGiocatore1, ID_ACQUA);
+    ResetMatrice(matGiocatore2, ID_ACQUA);
+    
+    //  Richiesta grandezza campo
+    ChiediGrandezzaCampo(lungC, lungR);
 
     //  Richiesta e lettura numero navi per ogni tipo
     LeggiNumeriNavi(vectNavi, naviTot, lungC, lungR);
 
     //  Inserimento navi per ogni giocatore
-    system("cls");
+    cout << "Inserisci le navi del giocatore 1:" << endl;
+    system("pause");
+    system("Cls");
     DisegnaCampo(matGiocatore1, lungC, lungR, hConsole);
     InserimentoNavi(matGiocatore1, vectNavi, lungC, lungR, hConsole);
     system("pause");
-    system("cls");
+
+    system("Cls");
+    cout << "Inserisci le navi del giocatore 2:" << endl;
+    system("pause");
+    system("Cls");
     DisegnaCampo(matGiocatore2, lungC, lungR, hConsole);
     InserimentoNavi(matGiocatore2, vectNavi, lungC, lungR, hConsole);
     system("pause");
 
-
+    //  Gioco.
     int res = Gioco(matGiocatore1, matGiocatore2, hConsole, naviTot, lungC, lungR);
     system("cls");
     switch (res)
@@ -137,6 +181,7 @@ int main()
 *   e' maggiore di RATEO_CAPACITA_MAX, allora il programma non permette di immettere più
 *   navi.
 *   Vedi come funziona vectNavi nelle ipotesi.
+*   Ritorna inoltre il numero delle navi. (Utile per Gioco()).
 */
 int LeggiNumeriNavi(int vectNavi[], int& numNavi, int lungC, int lungR)
 {
@@ -158,9 +203,10 @@ int LeggiNumeriNavi(int vectNavi[], int& numNavi, int lungC, int lungR)
             cout << "Quante navi di tipo " << VECT_NOMI_NAVI[i] << " (lunghezza: " << LUNG_NAVE(i) << ") vuoi? ";
             cin >> vectNavi[i];
 
+            //  Aggiungiamo il numero di caselle utilizzate dalla nave.
             temp += vectNavi[i] * LUNG_NAVE(i);
 
-            if (ControllaSeMaxRateo(temp, lungC, lungR))  //  Se il rateo massimo è sorpassato, allora non permettiamo all'utente di inserire la nave
+            if (CONTROLLA_MAX_RATEO(temp, lungC, lungR))  //  Se il rateo massimo è sorpassato, allora non permettiamo all'utente di inserire la nave
             {
                 cout << "Numero max di caselle per le navi raggiunto!!!" << endl;
                 ok = false;
@@ -192,22 +238,10 @@ int LeggiNumeriNavi(int vectNavi[], int& numNavi, int lungC, int lungR)
     return numNavi;
 }
 
-
-/*  Funzione ControllaSeMaxRateo
-*
-*   Controlla se il RATEO_CAPACITA_MAX è stato sorpassato.
-*/
-bool ControllaSeMaxRateo(int numCaselleUtilizzate, int lungC, int lungR)
-{
-    if (((float)numCaselleUtilizzate / (float)(lungC * lungR)) > RATEO_CAPACITA_MAX)
-        return true;
-    return false;
-}
-
-
 /*  Funzione ChiediVerso
 *
 *   Chiede il verso della nave, facendo in modo che l'input sia valido.
+*   Ritorna un booleano (VERSO_ORIZZONTALE o VERSO_VERTICALE)
 */
 bool ChiediVerso()
 {
@@ -271,7 +305,7 @@ void InserimentoNavi(int matCampo[][DIM_C], int vectNavi[], int lungC, int lungR
                     PosizionaNave(matCampo, coordC, coordR, verso, i);  //  Posizioniamo la nave e disegnamo il campo
                     ok = true;
 
-                    system("cls");
+                    system("Cls");
                     DisegnaCampo(matCampo, lungC, lungR, hConsole);
                 }
             } while (!ok);
@@ -369,48 +403,60 @@ void PosizionaNave(int matCampo[][DIM_C], int coordC, int coordR, bool verso, in
 
 /*  Procedura DisegnaCampo
 *
-*   Disegna il proprio campo, segnalando le proprie navi, colpite e non colpite.
+*   Disegna il proprio campo, segnalando le proprie navi, colpite e non colpite e dove il nemico ha colpito.
 *   Dobbiamo solo disegnare la navi non colpite, le navi colpite e le navi affondate.
+*   Prende in input il CAMPO AMICO.
 */
 void DisegnaCampo(int matCampo[][DIM_C], int lungC, int lungR, HANDLE hConsole)
 {
     cout << "    ";
-    for (int c = 0; c < lungC; c++) //cout lettere separate da tab
+    for (int c = 0; c < lungC; c++)
+        //  Se c < 9, allora non occuperà più di 1 carattere    => mettiamo 2 spazi.
+        //  Se c >= 10, allora occuperà 2 caratteri             => mettiamo 1 spazio.
         cout << c + 1 << (c < 9 ? "  " : " ");
     cout << endl;
 
 
     for (int r = 0; r < lungR; r++)
     {
+        //  NOTA: 'A' = 65. Possiamo utilizzare questo trick per ottenere tutti i caratteri successivi.
         cout << (char)(r + 65) << "   ";
         for (int c = 0; c < lungC; c++)
         {
-            if (matCampo[r][c] == ID_ACQUA)
+            switch (matCampo[r][c])
+            {
+            case ID_ACQUA:
             {
                 SetConsoleTextAttribute(hConsole, FOREGROUND_BLUE | FOREGROUND_INTENSITY);
                 cout << CHAR_ACQUA;
+                break;
             }
-            else if (matCampo[r][c] == ID_ACQUA_COLPITA)
+            case ID_ACQUA_COLPITA:
             {
                 SetConsoleTextAttribute(hConsole, FOREGROUND_BLUE | FOREGROUND_INTENSITY | BACKGROUND_BLUE);
                 cout << CHAR_ACQUA_COLPITA;
+                break;
             }
-            else if (matCampo[r][c] == ID_NAVE)
+            case ID_NAVE:
             {
                 SetConsoleTextAttribute(hConsole, FOREGROUND_BLUE | FOREGROUND_RED | FOREGROUND_GREEN);
                 cout << CHAR_NAVE;
+                break;
             }
-            else if (matCampo[r][c] == ID_NAVE_COLPITA)
+            case ID_NAVE_COLPITA:
             {
                 SetConsoleTextAttribute(hConsole, FOREGROUND_RED | FOREGROUND_GREEN);
                 cout << CHAR_NAVE_COLPITA;
+                break;
             }
-            else if (matCampo[r][c] == ID_NAVE_AFFONDATA)
+            case ID_NAVE_AFFONDATA:
             {
                 SetConsoleTextAttribute(hConsole, FOREGROUND_RED | FOREGROUND_INTENSITY);
                 cout << CHAR_NAVE_AFFONDATA;
+                break;
             }
-            SetConsoleTextAttribute(hConsole, FOREGROUND_BLUE | FOREGROUND_RED | FOREGROUND_GREEN);
+            }
+            SetConsoleTextAttribute(hConsole, FOREGROUND_BLUE | FOREGROUND_RED | FOREGROUND_GREEN); //  Reset colore
             cout << "  ";
         }
         SetConsoleTextAttribute(hConsole, FOREGROUND_BLUE | FOREGROUND_RED | FOREGROUND_GREEN);
@@ -420,43 +466,53 @@ void DisegnaCampo(int matCampo[][DIM_C], int lungC, int lungR, HANDLE hConsole)
     cout << endl;
 }
 
-/*  Procedura Disegna Campo.
+/*  Procedura DisegnaBersagli.
 *
 *   Disegna dove abbiamo colpito nel campo dell'avversario.
 *   Dobbiamo disegnare l'acqua colpita, le navi colpite e navi affondate.
 *   Le navi non colpite vengono ignorate.
+*   Prende in input il CAMPO AVVERSARIO
 */
 void DisegnaBersagli(int matCampo[][DIM_C], int lungC, int lungR, HANDLE hConsole)
 {
     cout << "    ";
-    for (int c = 0; c < lungC; c++) //cout numeri separate da spazi
+    for (int c = 0; c < lungC; c++)
+        //  Se c < 9, allora non occuperà più di 1 carattere    => mettiamo 2 spazi.
+        //  Se c >= 10, allora occuperà 2 caratteri             => mettiamo 1 spazio.
         cout << c + 1 << (c < 9 ? "  " : " ");
     cout << endl;
 
     for (int r = 0; r < lungR; r++)
     {
+        //  NOTA: 'A' = 65. Possiamo utilizzare questo trick per ottenere tutti i caratteri successivi.
         cout << (char)(r + 65) << "   ";
         for (int c = 0; c < lungC; c++)
         {
-            if (matCampo[r][c] == ID_ACQUA_COLPITA)
+            switch (matCampo[r][c])
+            {
+            case ID_ACQUA_COLPITA:
             {
                 SetConsoleTextAttribute(hConsole, FOREGROUND_BLUE | FOREGROUND_INTENSITY | BACKGROUND_BLUE);
                 cout << CHAR_ACQUA_COLPITA;
+                break;
             }
-            else if (matCampo[r][c] == ID_NAVE_COLPITA)
+            case ID_NAVE_COLPITA:
             {
                 SetConsoleTextAttribute(hConsole, BACKGROUND_RED | BACKGROUND_GREEN | BACKGROUND_INTENSITY);
                 cout << CHAR_NAVE_COLPITA;
+                break;
             }
-            else if (matCampo[r][c] == ID_NAVE_AFFONDATA)
+            case ID_NAVE_AFFONDATA:
             {
-                SetConsoleTextAttribute(hConsole, BACKGROUND_RED);
-                cout << CHAR_NAVE_AFFONDATA;
+                SetConsoleTextAttribute(hConsole, BACKGROUND_RED | BACKGROUND_GREEN | BACKGROUND_INTENSITY);
+                cout << CHAR_NAVE_COLPITA;
+                break;
             }
-            else
+            default:
             {
                 SetConsoleTextAttribute(hConsole, FOREGROUND_BLUE | FOREGROUND_INTENSITY);
                 cout << CHAR_ACQUA;
+            }
             }
             SetConsoleTextAttribute(hConsole, FOREGROUND_BLUE | FOREGROUND_RED | FOREGROUND_GREEN);
             cout << "  ";
@@ -474,10 +530,12 @@ void DisegnaBersagli(int matCampo[][DIM_C], int lungC, int lungR, HANDLE hConsol
 */
 void ResetMatrice(int matCampo[][DIM_C], int valore)
 {
+    //  ORIGINAL FORM:
     /*for (int y = 0; y < DIM_R; y++)
         for (int x = 0; x < DIM_C; x++)
             matCampo[x][y] = valore;*/
 
+    //  Forma avanzata... in pratica stiamo resettando la matrice settando direttamente i byte nella memoria. C STYLE.
     memset(matCampo, 0, DIM_C * DIM_R * sizeof(int));
 }
 
@@ -499,6 +557,7 @@ void ChiediCoordinate(int& coordC, int& coordR, int lungC, int lungR)
 
         coordC--;
 
+        //  Controlliamo che sia un valore valido
         if (coordC < 0 || coordC >= lungC)
         {
             cout << "colonna non valida!!!" << endl;
@@ -511,11 +570,12 @@ void ChiediCoordinate(int& coordC, int& coordR, int lungC, int lungR)
         ok = true;
         char temp;
 
+        //  NOTA: 'A' = 65. Possiamo utilizzare questo trick per ottenere tutti i caratteri successivi.
         cout << "Inserisci la riga [A-" << (char)(lungR + 64) << "]: ";
         cin >> temp;
         temp = CHAR_TO_INT(temp);
 
-        //  Visto che char è praticamente un intero possiamo fare sto cosa...
+        //  Visto che char è praticamente un intero possiamo fare sta cosa... Lo utilizziamo come un int.
         if (temp < 0 || temp >= lungR)
         {
             cout << "Input Non valido!!!" << endl;
@@ -526,96 +586,118 @@ void ChiediCoordinate(int& coordC, int& coordR, int lungC, int lungR)
 }
 
 
-
+/*  Funzione Gioco
+* 
+*   La funzione principale dove avviene il gioco.
+*   Ritorna il numero del giocatore che ha vinto o 3 se c'è stato un pareggio (vedi ipotesi).
+*/
 int Gioco(int matGiocatore1[][DIM_C], int matGiocatore2[][DIM_C], HANDLE hConsole, int naviTot, int lungC, int lungR)
 {
     system("cls");
 
-    int coordC, coordR, lungNave, res;
-    int naviG1 = naviTot, naviG2 = naviTot;
+    int coordC, coordR, res;
     bool ok;
 
+    //  Salviamo il numero di navi rimanenti per giocatore. Servono per vedere chi ha vinto.
+    int naviG1 = naviTot, naviG2 = naviTot;
+
+    //  Il gioco continua finchè almeno un giocatore ha perso.
     while (naviG1 != 0 && naviG2 != 0)
     {
         do
         {
+            //  Disegnamo il campo del giocatore 1 e dove ha già tirato nel campo del giocatore 2.
             system("cls");
             cout << "\t   GIOCATORE 1" << endl;
             DisegnaCampo(matGiocatore1, lungC, lungR, hConsole);
             cout << endl;
             DisegnaBersagli(matGiocatore2, lungC, lungR, hConsole);
 
+            //  Richiesta coordinate
             cout << "Inserisci le coordinate dove vuoi colpire: " << endl;
             ChiediCoordinate(coordC, coordR, lungC, lungR);
 
-            res = NaviColpite(matGiocatore2, coordC, coordR, lungC, lungR);
+            res = ColpisciNave(matGiocatore2, coordC, coordR, lungC, lungR);
 
-            if (res == -2) {
+            switch (res)
+            {
+            case -2:    //  Il giocatore ha già colpito nel punto.
+            {
                 cout << "Hai gia' colpito in quel punto. " << endl;
                 ok = false;
+                break;
             }
-            if (res == -1)
+            case -1:    //  Nave colpita
             {
                 cout << "Nave colpita!!" << endl;
                 ok = false;
+                break;
             }
-            else if (res == 0)
+            case 0:     //  Acqua colpita
             {
                 cout << "Acqua colpita!!" << endl;
                 ok = true;
+                break;
             }
-            else
+            default:    //  Nave colpita
             {
                 naviG2--;
                 cout << "Hai colpito un " << VECT_NOMI_NAVI[res - 1] << "!!!" << endl;
                 ok = false;
             }
-
+            }
             system("pause");
-        } while (!ok && naviG2 > 0);        
-
+        } while (!ok && naviG2 > 0);    //  Usciamo solo quando ok è falso o naviG2 è 0.
 
 
         do
         {
             system("cls");
 
+            //  Disegnamo il campo del giocatore 2 e dove ha già tirato nel campo del giocatore 1.
             cout << "\t   GIOCATORE 2" << endl;
             DisegnaCampo(matGiocatore2, lungC, lungR, hConsole);
             cout << endl;
             DisegnaBersagli(matGiocatore1, lungC, lungR, hConsole);
 
-            ok = true;
+            //  Richiesta coordinate
             cout << "Inserisci le coordinate dove vuoi colpire: " << endl;
             ChiediCoordinate(coordC, coordR, lungC, lungR);
 
-            res = NaviColpite(matGiocatore1, coordC, coordR, lungC, lungR);
+            res = ColpisciNave(matGiocatore1, coordC, coordR, lungC, lungR);
 
-            if (res == -2) {
+            switch (res)
+            {
+            case -2:    //  Il giocatore ha già colpito nel punto.
+            {
                 cout << "Hai gia' colpito in quel punto. " << endl;
                 ok = false;
+                break;
             }
-            if (res == -1)
+            case -1:    //  Nave colpita
             {
                 cout << "Nave colpita!!" << endl;
                 ok = false;
+                break;
             }
-            else if (res == 0)
+            case 0:     //  Acqua colpita
             {
                 cout << "Acqua colpita!!" << endl;
                 ok = true;
+                break;
             }
-            else
+            default:    //  Nave colpita
             {
                 naviG1--;
                 cout << "Hai colpito un " << VECT_NOMI_NAVI[res - 1] << "!!!" << endl;
                 ok = false;
             }
-
+            }
             system("pause");
         } while (!ok && naviG1 > 0);
     }
-    //cout vincitore
+
+
     if (naviG1 != 0 && naviG2 == 0)
         return 1;
     else if (naviG1 == 0 && naviG2 != 0)
@@ -625,12 +707,20 @@ int Gioco(int matGiocatore1[][DIM_C], int matGiocatore2[][DIM_C], HANDLE hConsol
 }
 
 /*
-        -2 = coordinate già usate
-        -1 = nave colpita (non affondata)
-         0 = acqua colpita
-        num >= 1 = lunghezza nave affondata
+*   Funzione ColpisciNave
+* 
+*   Si occupa di modificare il tabellone in base a cosa colpisce il giocatore.
+*   Controlla anche se la nave colpita è stata affondata.
+*   Non si occupa di fare cout o avvertire il giocatore. Per quello ci sono i valori
+*   di ritorno.
+* 
+*   Valore di ritorno:
+*       -2          = coordinate già usate
+*       -1          = nave colpita (non affondata)
+*        0          = acqua colpita
+*       num >= 1    = lunghezza nave affondata
 */
-int NaviColpite(int mat[][DIM_C], int coordC, int coordR, int lungC, int lungR)
+int ColpisciNave(int mat[][DIM_C], int coordC, int coordR, int lungC, int lungR)
 {
     bool ok = false;
     int returnValue = -2;
@@ -644,9 +734,9 @@ int NaviColpite(int mat[][DIM_C], int coordC, int coordR, int lungC, int lungR)
             { //da capire se la nave è stata affondata o solo colpita
 
                 //  Calcolo delle coordinate iniziali all'esterno del ciclo per evitare di fare lo stesso calcolo più volte e per motivi di leggibilità.
-                int startR = coordR - ((coordR <= 0) ? 0 : 1);  //  Se siamo nella prima riga della matrice non possiamo controllare più in alto
-                int endR = coordR + ((coordR >= (lungR - 1)) ? 0 : 1);   //  Se la nave arriva ad occupare l'ultima riga della matrice non possiamo controllare più in basso
-                int startC = coordC - ((coordC <= 0) ? 0 : 1);  //  Se siamo nella prima colonna della matrice non possiamo controllare più a sinistra.
+                int startR = coordR - ((coordR <= 0) ? 0 : 1);          //  Se siamo nella prima riga della matrice non possiamo controllare più in alto
+                int endR = coordR + ((coordR >= (lungR - 1)) ? 0 : 1);  //  Se la nave arriva ad occupare l'ultima riga della matrice non possiamo controllare più in basso
+                int startC = coordC - ((coordC <= 0) ? 0 : 1);          //  Se siamo nella prima colonna della matrice non possiamo controllare più a sinistra.
                 int endC = coordC + ((coordC >= (lungC - 1)) ? 0 : 1);  //  Se siamo nell'ultima colonna della matrice non possiamo controllare più a destra.
 
                 bool mina = true;
@@ -663,19 +753,19 @@ int NaviColpite(int mat[][DIM_C], int coordC, int coordR, int lungC, int lungR)
                     {
                         if (mat[r][c] == ID_NAVE || mat[r][c] == ID_NAVE_COLPITA)
                         {
-                            if (c < coordC || c > coordC)
+                            if (c < coordC || c > coordC)   //  Se abbiamo trovato una nave a est o a ovest, allora il verso è orizzontale
                             {
                                 mina = false;
                                 verso = VERSO_ORIZZONTALE;
 
-                                break;
+                                break;  //  Usciamo così... Un controllo in meno.
                             }
-                            else if (r < coordR || r > coordR)
+                            else if (r < coordR || r > coordR)  //  Se abbiamo trovato una nave a nord o a sud, allora il verso è verticale
                             {
                                 mina = false;
                                 verso = VERSO_VERTICALE;
 
-                                break;
+                                break;  //  Usciamo così... Un controllo in meno.
                             }
                         }
                         c++;
@@ -683,97 +773,97 @@ int NaviColpite(int mat[][DIM_C], int coordC, int coordR, int lungC, int lungR)
                     r++;
                 }
 
+                //  Resettiamo la casella colpita.
                 mat[coordR][coordC] = ID_NAVE_COLPITA;
 
-                if (mina)  //  Solo la mina
+                if (mina)   //  Mina è a true solo se non abbiamo trovato navi vicino a dove abbiamo colpito.
                 {
                     returnValue = 1;
                     mat[coordR][coordC] = ID_NAVE_AFFONDATA;
-                    return ok;
-                    //cout << "Hai colpito una " << VECT_NOMI_NAVI[0] << "!!!" << endl;
                 }
-                else {
-                    if (verso == VERSO_ORIZZONTALE)
-                        returnValue = NaveOrizzontale(mat, coordC, coordR, lungC);
-                    else
-                        returnValue = NaveVerticale(mat, coordC, coordR, lungR);
-                }
+                else        //  Ci sono anche altre navi vicino. Controlliamo che non sia affondata.
+                    returnValue = ControllaAffondata(mat, coordC, coordR, lungC, lungR, verso);
+                
             }
-        }
-        else
+        } 
+        else    //  Abbiamo colpito l'acqua.
         {
-            mat[coordR][coordC] = ID_ACQUA_COLPITA; //cambio con acqua colpita
+            mat[coordR][coordC] = ID_ACQUA_COLPITA; 
             returnValue = 0;
         }
     }
-    else
-        returnValue = -2;
 
+    //  Se returnValue è ancora -2, allora abbiamo colpito uno spazio già colpito.
     return returnValue;
 }
 
-int NaveOrizzontale(int mat[][DIM_C], int c, int r, int lungC)
+/*  Funzione ControllaAffondata
+* 
+*   Controlla se la nave è affondata e rimpiazza il suo contenuto con ID_NAVE_AFFONDATA.
+*   Ritorna la lunghezza della nave affondata o -1 se la nave non è affondata.
+*/
+int ControllaAffondata(int mat[][DIM_C], int c, int r, int lungC, int lungR, bool verso)
 {
-    //due step
-        //1- mi muovo verso sx per trovare l'acqua
-    int temp = c - 1;
-    int spostamentiDx = 1;
-    int spostamentiSx = 1;
+    if (verso == VERSO_ORIZZONTALE)
+    {
+        int temp = c - 1;
+        int spostamentiDx = 1;
+        int spostamentiSx = 1;
 
-    while (temp >= 0 && mat[r][temp] != ID_ACQUA && mat[r][temp] != ID_ACQUA_COLPITA) {
-        if (mat[r][temp] == ID_NAVE)
-        {
-            return -1;
+        while (temp >= 0 && mat[r][temp] != ID_ACQUA && mat[r][temp] != ID_ACQUA_COLPITA) {
+            if (mat[r][temp] == ID_NAVE)
+            {
+                return -1;
+            }
+            temp--;
+            spostamentiSx++;
         }
-        temp--;
-        spostamentiSx++;
+
+        temp = c + 1;
+        while (temp <= (lungC - 1) && mat[r][temp] != ID_ACQUA && mat[r][temp] != ID_ACQUA_COLPITA) {
+            if (mat[r][temp] == ID_NAVE)
+                return -1;
+            temp++;
+            spostamentiDx++;
+        }
+
+        for (int i = c - spostamentiSx + 1; i <= c + spostamentiDx - 1; i++)
+            mat[r][i] = ID_NAVE_AFFONDATA;
+
+        return spostamentiDx + spostamentiSx - 1;
     }
+    else    //  Verso Verticale
+    {
+        int temp = r - 1;
+        int spostamentiSu = 1;
+        int spostamentiGiu = 1;
 
-    temp = c + 1;
-    while (temp <= (lungC - 1) && mat[r][temp] != ID_ACQUA && mat[r][temp] != ID_ACQUA_COLPITA) {
-        if (mat[r][temp] == ID_NAVE)
-            return -1;
-        temp++;
-        spostamentiDx++;
+        while (temp >= 0 && mat[temp][c] != ID_ACQUA && mat[temp][c] != ID_ACQUA_COLPITA) {
+            if (mat[temp][c] == ID_NAVE)
+                return -1;
+            temp--;
+            spostamentiSu++;
+        }
+
+        temp = r + 1;
+        while (temp <= (lungR - 1) && mat[temp][c] != ID_ACQUA && mat[temp][c] != ID_ACQUA_COLPITA) {
+            if (mat[temp][c] == ID_NAVE)
+                return -1;
+            temp++;
+            spostamentiGiu++;
+        }
+
+        for (int i = r - spostamentiSu + 1; i <= r + spostamentiGiu - 1; i++)
+            mat[i][c] = ID_NAVE_AFFONDATA;
+
+        return spostamentiSu + spostamentiGiu - 1;
     }
-
-    for (int i = c - spostamentiSx + 1; i <= c + spostamentiDx - 1; i++)
-        mat[r][i] = ID_NAVE_AFFONDATA;
-
-    return spostamentiDx + spostamentiSx - 1;
 }
 
-
-int NaveVerticale(int mat[][DIM_C], int c, int r, int lungR)
-{
-    //due step
-    //1- mi muovo verso sx per trovare l'acqua
-    int temp = r - 1;
-    int spostamentiSu = 1;
-    int spostamentiGiu = 1;
-
-    while (temp >= 0 && mat[temp][c] != ID_ACQUA && mat[temp][c] != ID_ACQUA_COLPITA) {
-        if (mat[temp][c] == ID_NAVE)
-            return -1;
-        temp--;
-        spostamentiSu++;
-    }
-
-    temp = r + 1;
-    while (temp <= (lungR - 1) && mat[temp][c] != ID_ACQUA && mat[temp][c] != ID_ACQUA_COLPITA) {
-        if (mat[temp][c] == ID_NAVE)
-            return -1;
-        temp++;
-        spostamentiGiu++;
-    }
-
-    for (int i = r - spostamentiSu + 1; i <= r + spostamentiGiu - 1; i++)
-        mat[i][c] = ID_NAVE_AFFONDATA;
-
-    return spostamentiSu + spostamentiGiu - 1;
-}
-
-
+/*  Funzione ChiediGrandezzaCampo
+* 
+*   Semplice funzione che chiede la grandezza del campo.
+*/
 void ChiediGrandezzaCampo(int& lungC, int& lungR) {
     bool ok = true;
     do 
